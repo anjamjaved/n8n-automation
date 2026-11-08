@@ -15,6 +15,11 @@ import {
 } from './mcp-tool-name-validation';
 import { listConnectedMcpServices } from '../mcp/connected-mcp-services';
 import { getVersionedSystemPrompt, resolvePromptProfile } from '../prompts/prompt-profiles';
+import { createGotchaNotesProvider } from '../skills/gotcha-notes';
+import { INTENT_RECOGNITION_GOTCHAS } from '../skills/gotchas/intent-recognition.gotchas';
+import { POST_BUILD_FLOW_GOTCHAS } from '../skills/gotchas/post-build-flow.gotchas';
+import { WORKFLOW_BUILDER_GOTCHAS } from '../skills/gotchas/workflow-builder.gotchas';
+import { parseAblatedGotchas } from '../skills/skill-gotchas';
 import { createToolRegistry, mergeToolRegistries, toolRegistryValues } from '../tool-registry';
 import {
 	createOrchestratorDomainTools,
@@ -22,7 +27,11 @@ import {
 	getActiveOrchestratorDomainToolNames,
 } from '../tools';
 import { createToolsFromLocalMcpServer } from '../tools/create-tools-from-mcp-server';
-import { ALWAYS_LOADED_TOOL_NAMES } from '../tools/tool-ids';
+import {
+	ALWAYS_LOADED_TOOL_NAMES,
+	getToolNamespace,
+	getToolNamespaceDescription,
+} from '../tools/tool-ids';
 import { isSetupPanelEnabled } from '../tools/workflows/setup-items';
 import {
 	buildAgentTraceInputs,
@@ -243,7 +252,28 @@ export async function createInstanceAgent(
 		applyAgentThinking(agent, modelId);
 	}
 	if (hasDeferrableTools) {
-		agent.deferredTool(toolRegistryValues(deferredTools), { search: { topK: 5 } });
+		// Catalog mode keeps the toolset fixed for the whole run, so the prompt cache
+		// survives, and a deferred tool costs one call_tool call instead of a load step.
+		agent.toolDeferral({ mode: 'catalog' });
+		// MCP tools are listed under their server and n8n tools under their resource
+		// (workflows, data_tables, agents, ...), so the model can browse one area
+		// with find_tools({ namespace }) instead of searching the whole set.
+		const byNamespace = new Map<string | undefined, InstanceAiToolRegistry>();
+		for (const [name, tool] of deferredTools) {
+			const namespace = tool.mcpServerName ?? getToolNamespace(name);
+			const group = byNamespace.get(namespace) ?? createToolRegistry();
+			group.set(name, tool);
+			byNamespace.set(namespace, group);
+		}
+		for (const [namespace, group] of byNamespace) {
+			const namespaceDescription = namespace
+				? (getToolNamespaceDescription(namespace) ?? `tools from the ${namespace} MCP server`)
+				: undefined;
+			agent.deferredTool(
+				toolRegistryValues(group),
+				namespace ? { namespace, namespaceDescription } : undefined,
+			);
+		}
 	}
 	// The agents module owns the builder skills that are generated from its config schema.
 	const builderSkills = context.builderDelegate?.getRuntimeSkills() ?? [];
@@ -257,6 +287,23 @@ export async function createInstanceAgent(
 	}
 	if (orchestrationContext?.workspace) agent.workspace(orchestrationContext.workspace);
 	if (skills) agent.skills(skills);
+	if (skills) {
+		const threshold = Number(process.env.N8N_INSTANCE_AI_GOTCHA_THRESHOLD);
+		agent.contextNotes(
+			createGotchaNotesProvider({
+				sets: [WORKFLOW_BUILDER_GOTCHAS, INTENT_RECOGNITION_GOTCHAS, POST_BUILD_FLOW_GOTCHAS],
+				embeddingModel: options.gotchaRetrieval?.embeddingModel,
+				onRetrieval: options.gotchaRetrieval?.onRetrieval,
+				onEmbeddingFailure: (error) =>
+					context.logger.warn('Gotcha embedding failed; ranking gotchas with BM25 for this run', {
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				// Eval-only overrides: tune the threshold and ablate gotchas without a code change.
+				threshold: Number.isFinite(threshold) && threshold > 0 ? threshold : undefined,
+				ablated: parseAblatedGotchas(process.env.N8N_INSTANCE_AI_SKILL_ABLATE),
+			}),
+		);
+	}
 
 	if (options.memory) {
 		const mem = new Memory().storage(options.memory);
@@ -316,7 +363,7 @@ export async function createInstanceAgent(
 					}
 				: undefined,
 			toolSearchEnabled: hasDeferrableTools,
-			inputProcessors: hasDeferrableTools ? ['NativeToolSearch'] : undefined,
+			inputProcessors: hasDeferrableTools ? ['ToolCatalog'] : undefined,
 			skills: skills?.registry,
 		}),
 	);

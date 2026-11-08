@@ -6,11 +6,9 @@ description: >-
   the user has no usable credential for a capability, when the user asks what
   Gateway credits support, or when a build result says Gateway credits are
   depleted.
-recommended_tools:
-  - search_nodes
-  - get_node_types
-  - list_credentials
-  - search_credential_types
+recommended_namespaces:
+  - nodes
+  - credentials
 ---
 
 # Service Selection
@@ -32,7 +30,7 @@ for a comparable tool.
 The `categories` list and search *rank* don't prioritize Gateway credits coverage
 (individual search results still flag it). When the user asks for a capability
 they have no usable credential for, search that
-capability — or run `search_nodes(gatewayCreditsOnly=true)` — before
+capability — or run `search_nodes` through `call_tool` with `gatewayCreditsOnly: true` — before
 committing, and prefer a covered result.
 
 Respect the constraints it reports:
@@ -55,9 +53,18 @@ Respect the constraints it reports:
 yet, prefer Gateway credits over stored credentials if the credential type is
 supported — it works with no API key required and avoids spending the user's
 API quota. The synthetic entry in `list_credentials(type=...)` (see
-Credential Rules) is your signal that a type is covered. Do not change
+below) is your signal that a type is covered. Do not change
 credentials on nodes that already have one assigned (editing an existing
 workflow, or after the user has made a credential choice).
+
+**Writing Gateway credits on a node:** `list_credentials(type=...)` can include
+`{ id: "__AI_GATEWAY_MANAGED__", name: "Gateway credits", type, __aiGatewayManaged: true }`
+when the type is covered. Use its `id` like any stored credential id:
+`newCredential('Gateway credits', '__AI_GATEWAY_MANAGED__')`. The build keeps
+it and attaches Gateway credits, even when the user has their own credential
+of that type. Write it whenever the user asks for Gateway credits; otherwise
+the normal reuse rules apply. When the user has no stored credential of a
+covered type, the build attaches Gateway credits even without this entry.
 
 If `credentialResolutionNote` on the build result says Gateway credits are
 depleted, follow that note: tell the user they must top up Gateway credits

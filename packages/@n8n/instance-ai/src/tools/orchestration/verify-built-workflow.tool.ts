@@ -16,7 +16,11 @@ import {
 	TRIGGER_INPUT_DATA_DESCRIPTION,
 	TRIGGER_NODE_NAME_DESCRIPTION,
 } from '../shared/trigger-input-descriptions';
-import { buildEmptyOutputNote, buildNodePreviews } from './verification/analyze-result';
+import {
+	buildEmptyOutputNote,
+	buildMissingFieldNote,
+	buildNodePreviews,
+} from './verification/analyze-result';
 import { deriveVerificationClaim } from './verification/claim';
 import {
 	handleMissingSimulationPlan,
@@ -173,6 +177,8 @@ const verifyBuiltWorkflowOutputSchema = z.object({
 	coverageNote: z.string().optional(),
 	/** Real nodes that returned only `{}` items. */
 	emptyOutputNote: z.string().optional(),
+	/** Expressions that read a `$json` field no input item has. */
+	missingFieldNote: z.string().optional(),
 	/** Set when n8n redacted the run's output for the user, so it was not inspected. */
 	redactionNote: z.string().optional(),
 	/**
@@ -196,7 +202,7 @@ export function createVerifyBuiltWorkflowTool(context: OrchestrationContext) {
 		.description(
 			'Standard post-build verifier: runs a built workflow with sidecar verification context from the build outcome ' +
 				'(pin data, mocked credentials, trigger-shaped inputData; all trigger types supported). ' +
-				'Use `run_workflow` only for ad hoc runs outside build verification. ' +
+				'Run `run_workflow` through `call_tool` only for ad hoc runs outside build verification. ' +
 				'CRITICAL: `inputData` shape depends on the trigger type (see the field description) — a wrong shape produces ' +
 				'null downstream values that look like an expression bug; re-run verify with the correct shape instead of patching the workflow.',
 		)
@@ -420,6 +426,7 @@ export function createVerifyBuiltWorkflowTool(context: OrchestrationContext) {
 				logger: context.logger,
 			});
 			const simulationNote = [
+				prepared.ignoredGateOverrideNote,
 				analysis.simulationNote,
 				buildResolvedParameterNote(
 					resolvedParameterWarnings,
@@ -459,6 +466,7 @@ export function createVerifyBuiltWorkflowTool(context: OrchestrationContext) {
 					simulatedNames,
 					result.binaryOutputNodeNames,
 				),
+				missingFieldNote: buildMissingFieldNote(result.data, workflow, simulatedNames),
 				redactionNote: analysis.redactionNote,
 				liveStateNote: formatLiveStateNote(claim),
 				...(resolvedInput.includeData ? { data: result.data } : {}),

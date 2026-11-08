@@ -20,6 +20,7 @@ import {
 	autoImportMissingSdkSymbols,
 	buildWorkflowInputSchema,
 	createBuildWorkflowTool,
+	rewriteArrowFromAi,
 } from '../build-workflow.tool';
 import { collectHostSdkValidatorWarnings } from '../host-sdk-validation';
 import { prepareWorkflowSetup } from '../prepare-workflow-setup';
@@ -635,15 +636,8 @@ describe('createBuildWorkflowTool', () => {
 		expect(result.postBuildFlow?.guidance).toContain(
 			'then mocked/no-mock live-test when latest verification used mocks or simulations',
 		);
-		expect(result.postBuildFlow?.guidance).toContain(
-			'never offer publishing as an alternative to the live test',
-		);
-		expect(result.postBuildFlow?.guidance).toContain(
-			'A user-run execution counts only after `list_executions`',
-		);
-		expect(result.postBuildFlow?.guidance).toContain(
-			'Do not replace the error-workflow opt-in with a generic add-anything',
-		);
+		// Phase rules arrive as post-build-flow gotchas, not in every build result.
+		expect(result.postBuildFlow?.guidance).not.toContain('list_executions');
 		expect(compileWorkflowSource).toHaveBeenCalledWith(context, filePath, source, undefined);
 		expect(context.workflowService.createFromWorkflowJSON).toHaveBeenCalledWith(
 			expect.objectContaining({ name: 'Daily Weather to Slack' }),
@@ -2882,7 +2876,7 @@ describe('createBuildWorkflowTool', () => {
 		});
 		expect(result.errors?.[0]).toContain('Failed to bind source file');
 		expect(result.remediation?.guidance).toContain(
-			'Call workflow_builder_build_workflow again with the same filePath and omit workflowId',
+			'Run workflow_builder_build_workflow through call_tool again with the same filePath and omit workflowId',
 		);
 		expect(context.workflowService.updateFromWorkflowJSON).not.toHaveBeenCalled();
 		expect(context.workflowService.createFromWorkflowJSON).not.toHaveBeenCalled();
@@ -3501,6 +3495,33 @@ describe('createBuildWorkflowTool', () => {
 			'You already tried this',
 		);
 		expect((repeatSupportingAttempt.errors ?? []).join('\n')).toContain('You already tried this');
+	});
+});
+
+describe('rewriteArrowFromAi', () => {
+	it('rewrites the parenthesised and bare arrow forms to fromAi()', () => {
+		const source = [
+			"to: ($) => $.fromAi('to', 'Recipient'),",
+			"subject: (x) => x.fromAi('subject'),",
+			"body: $ => $.fromAi('body', 'Text', 'string'),",
+		].join('\n');
+
+		const result = rewriteArrowFromAi(source);
+
+		expect(result?.count).toBe(3);
+		expect(result?.source).toBe(
+			[
+				"to: fromAi('to', 'Recipient'),",
+				"subject: fromAi('subject'),",
+				"body: fromAi('body', 'Text', 'string'),",
+			].join('\n'),
+		);
+	});
+
+	it('leaves other arrows and direct calls alone', () => {
+		const source = "a: (x) => y.fromAi('a'),\nb: fromAi('b'),\nc: myFn$ => myFn$.other(1)";
+
+		expect(rewriteArrowFromAi(source)).toBeUndefined();
 	});
 });
 
