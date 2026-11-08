@@ -1,3 +1,5 @@
+import isEqual from 'lodash/isEqual';
+
 import type { IWorkflowSettings } from './interfaces';
 
 /**
@@ -38,3 +40,40 @@ export type VersionedWorkflowSettingKey = {
 }[keyof SettingsScopeMap];
 
 export type VersionedWorkflowSettings = Pick<IWorkflowSettings, VersionedWorkflowSettingKey>;
+
+const isVersionedEntry = (
+	entry: [string, WorkflowSettingScope],
+): entry is [VersionedWorkflowSettingKey, 'version'] => entry[1] === 'version';
+
+const VERSIONED_WORKFLOW_SETTING_KEYS: readonly VersionedWorkflowSettingKey[] = Object.entries(
+	WORKFLOW_SETTINGS_SCOPE,
+)
+	.filter(isVersionedEntry)
+	.map(([key]) => key);
+
+/** The value of a version-scoped setting that the workflow settings do not set. */
+const VERSIONED_SETTING_DEFAULTS: Required<VersionedWorkflowSettings> = { engineType: 'v1' };
+
+/**
+ * Returns the version-scoped settings, with the default for each setting that is not set.
+ * So a new version always stores its engine, and `v1` compares equal to no engine.
+ */
+export function pickVersionedSettings(
+	settings?: IWorkflowSettings,
+): Required<VersionedWorkflowSettings> {
+	const result = { ...VERSIONED_SETTING_DEFAULTS };
+	for (const key of VERSIONED_WORKFLOW_SETTING_KEYS) {
+		const value = settings?.[key];
+		if (value === undefined || value === null) continue;
+		result[key] = value;
+	}
+
+	return result;
+}
+
+export function versionedSettingsEqual(
+	settingsA?: IWorkflowSettings,
+	settingsB?: IWorkflowSettings,
+): boolean {
+	return isEqual(pickVersionedSettings(settingsA), pickVersionedSettings(settingsB));
+}
