@@ -1065,6 +1065,7 @@ onBeforeUnmount(() => {
 						<N8nTooltip placement="top">
 							<template #content>
 								<div v-text="helpTexts.engineType"></div>
+								<div v-text="i18n.baseText('workflowSettings.engineType.appliesOnPublish')"></div>
 							</template>
 							<N8nIcon icon="circle-help" />
 						</N8nTooltip>
